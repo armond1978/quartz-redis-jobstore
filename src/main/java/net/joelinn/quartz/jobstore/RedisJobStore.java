@@ -105,6 +105,18 @@ public class RedisJobStore implements JobStore {
     protected int soTimeout = 3000;
 
 
+    @Override
+    // Support for Quartz 2.3.0
+    public void resetTriggerFromErrorState(TriggerKey triggerKey) throws JobPersistenceException {
+        throw new UnsupportedOperationException("Feature not supported!");
+    }
+
+    @Override
+    // Support for Quartz 2.3.0
+    public long getAcquireRetryDelay(int failureCount) {
+        throw new UnsupportedOperationException("Feature not supported!");
+    }
+
     public RedisJobStore setJedisPool(Pool<Jedis> jedisPool) {
         this.jedisPool = jedisPool;
         return this;
@@ -139,29 +151,33 @@ public class RedisJobStore implements JobStore {
                 .addMixIn(HolidayCalendar.class, HolidayCalendarMixin.class)
                 .setSerializationInclusion(JsonInclude.Include.NON_NULL);
 
-        if (redisCluster && jedisCluster == null) {
-            Set<HostAndPort> nodes = buildNodesSetFromHost();
-            JedisPoolConfig jedisPoolConfig = new JedisPoolConfig();
-            jedisCluster = new JedisCluster(nodes, this.conTimeout, this.soTimeout, this.conRetries, this.password,jedisPoolConfig);
-            storage = new RedisClusterStorage(redisSchema, mapper, signaler, instanceId, lockTimeout);
-        } else if (jedisPool == null) {
-            JedisPoolConfig jedisPoolConfig = new JedisPoolConfig();
-            jedisPoolConfig.setTestOnBorrow(true);
-            if (redisSentinel) {
+        if (redisCluster) {
+            if (jedisCluster == null) {
                 Set<HostAndPort> nodes = buildNodesSetFromHost();
-                Set<String> nodesAsStrings = new HashSet<>();
-                for (HostAndPort node : nodes) {
-                    nodesAsStrings.add(node.toString());
+                JedisPoolConfig jedisPoolConfig = new JedisPoolConfig();
+                jedisCluster = new JedisCluster(nodes, this.conTimeout, this.soTimeout, this.conRetries, this.password, jedisPoolConfig);
+            }
+            storage = new RedisClusterStorage(redisSchema, mapper, signaler, instanceId, lockTimeout);
+        } else {
+            if (jedisPool == null) {
+                JedisPoolConfig jedisPoolConfig = new JedisPoolConfig();
+                jedisPoolConfig.setTestOnBorrow(true);
+                if (redisSentinel) {
+                    Set<HostAndPort> nodes = buildNodesSetFromHost();
+                    Set<String> nodesAsStrings = new HashSet<>();
+                    for (HostAndPort node : nodes) {
+                        nodesAsStrings.add(node.toString());
+                    }
+                    if (logger.isDebugEnabled()) {
+                        logger.debug("Instantiating JedisSentinelPool using master " + masterGroupName + " and hosts " + host);
+                    }
+                    jedisPool = new JedisSentinelPool(masterGroupName, nodesAsStrings, jedisPoolConfig, Protocol.DEFAULT_TIMEOUT, password, database);
+                } else {
+                    if (logger.isDebugEnabled()) {
+                        logger.debug("Instantiating JedisPool using host " + host + " and port " + port);
+                    }
+                    jedisPool = new JedisPool(jedisPoolConfig, host, port, Protocol.DEFAULT_TIMEOUT, password, database);
                 }
-                if (logger.isDebugEnabled()) {
-                    logger.debug("Instantiating JedisSentinelPool using master " + masterGroupName + " and hosts " + host);
-                }
-                jedisPool = new JedisSentinelPool(masterGroupName, nodesAsStrings, jedisPoolConfig, Protocol.DEFAULT_TIMEOUT, password, database);
-            } else {
-                if (logger.isDebugEnabled()) {
-                    logger.debug("Instantiating JedisPool using host " + host + " and port " + port);
-                }
-                jedisPool = new JedisPool(jedisPoolConfig, host, port, Protocol.DEFAULT_TIMEOUT, password, database);
             }
             storage = new RedisStorage(redisSchema, mapper, signaler, instanceId, lockTimeout);
         }
